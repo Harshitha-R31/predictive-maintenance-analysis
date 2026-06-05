@@ -69,12 +69,23 @@ def plot_shap(shap_values, X_test):
     """Return SHAP summary bar chart as matplotlib figure"""
     fig, ax = plt.subplots(figsize=(8, 4))
 
-    # shap_values[1] = SHAP values for class 1 (Failure)
+    # Handle both old and new SHAP output formats
+    # Old SHAP: shap_values is a list [class0_array, class1_array]
+    # New SHAP: shap_values is a 3D array (samples, features, classes)
+    if isinstance(shap_values, list):
+        # Old format — pick class 1 (Failure)
+        sv = shap_values[1] if len(shap_values) > 1 else shap_values[0]
+    elif hasattr(shap_values, "ndim") and shap_values.ndim == 3:
+        # New format — slice class 1
+        sv = shap_values[:, :, 1]
+    else:
+        sv = shap_values
+
     shap.summary_plot(
-        shap_values[1], X_test,
+        sv, X_test,
         plot_type="bar",
         show=False,
-        color='#E05C2A'
+        color="#E05C2A"
     )
     plt.title("Feature Importance (SHAP) — Failure Prediction", fontsize=12)
     plt.tight_layout()
