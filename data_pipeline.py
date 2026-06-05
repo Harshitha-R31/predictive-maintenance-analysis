@@ -1,78 +1,77 @@
 import pandas as pd
 import numpy as np
+import streamlit as st
 
 def load_and_clean(file):
     """Load CSV and clean the data"""
     df = pd.read_csv(file)
 
-    # ── Rename columns to standard names ──────────────────────────────────
-    # Handles different column name formats from various datasets
-    rename_map = {
-        # Timestamp variants
-        'timestamp': 'Timestamp', 'time': 'Timestamp', 'date': 'Timestamp',
-        'Date': 'Timestamp', 'Time': 'Timestamp',
+    # ── Debug: show actual columns ─────────────────────────────────────────
+    st.write("📋 Columns found in your CSV:", list(df.columns))
 
-        # Equipment ID variants
-        'equipment_id': 'Equipment_ID', 'machine_id': 'Equipment_ID',
-        'Machine_ID': 'Equipment_ID', 'UDI': 'Equipment_ID',
-        'Product ID': 'Equipment_ID', 'Product_ID': 'Equipment_ID',
+    # ── Auto-detect numeric columns ────────────────────────────────────────
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
-        # Temperature variants
-        'temperature': 'Temperature_C', 'temp': 'Temperature_C',
-        'Temperature': 'Temperature_C', 'Air temperature [K]': 'Temperature_C',
-        'Process temperature [K]': 'Temperature_C',
-        'air_temperature': 'Temperature_C',
+    # Remove known non-sensor columns
+    exclude = ['Failure_Status', 'failure', 'Machine failure', 'target',
+               'Target', 'label', 'TWF', 'HDF', 'PWF', 'OSF', 'RNF']
+    sensor_cols = [c for c in numeric_cols if c not in exclude]
 
-        # Vibration variants
-        'vibration': 'Vibration_ms2', 'Vibration': 'Vibration_ms2',
-        'Rotational speed [rpm]': 'Vibration_ms2',
-        'rotational_speed': 'Vibration_ms2', 'rpm': 'Vibration_ms2',
-        'Torque [Nm]': 'Vibration_ms2',
+    # ── Map to standard names by keyword matching ──────────────────────────
+    def find_col(keywords, cols):
+        for kw in keywords:
+            for c in cols:
+                if kw.lower() in c.lower():
+                    return c
+        return None
 
-        # Voltage variants
-        'voltage': 'Voltage_V', 'Voltage': 'Voltage_V',
-        'Tool wear [min]': 'Voltage_V', 'tool_wear': 'Voltage_V',
-        'power': 'Voltage_V', 'Power': 'Voltage_V',
+    temp_col  = find_col(['temp', 'temperature'], sensor_cols)
+    vib_col   = find_col(['vibrat', 'rotational', 'rpm', 'torque', 'speed'], sensor_cols)
+    volt_col  = find_col(['volt', 'tool', 'wear', 'power', 'current'], sensor_cols)
+    fail_col  = find_col(['failure', 'fail', 'target', 'label'], df.columns.tolist())
+    id_col    = find_col(['id', 'equipment', 'machine', 'product', 'udi'], df.columns.tolist())
+    time_col  = find_col(['time', 'timestamp', 'date'], df.columns.tolist())
 
-        # Failure variants
-        'failure': 'Failure_Status', 'Failure': 'Failure_Status',
-        'Machine failure': 'Failure_Status', 'target': 'Failure_Status',
-        'Target': 'Failure_Status', 'label': 'Failure_Status',
-        'failure_status': 'Failure_Status',
-    }
-    df = df.rename(columns=rename_map)
+    # If still not found, assign first 3 numeric cols
+    if temp_col is None and len(sensor_cols) > 0:
+        temp_col = sensor_cols[0]
+    if vib_col is None and len(sensor_cols) > 1:
+        vib_col = sensor_cols[1]
+    if volt_col is None and len(sensor_cols) > 2:
+        volt_col = sensor_cols[2]
 
-    # If Timestamp column missing, create a dummy one
-    if 'Timestamp' not in df.columns:
-        df['Timestamp'] = pd.date_range(start='2024-01-01', periods=len(df), freq='1min')
+    st.write(f"✅ Mapped → Temperature: `{temp_col}` | Vibration: `{vib_col}` | Voltage: `{volt_col}` | Failure: `{fail_col}`")
 
-    # If Equipment_ID column missing, create a dummy one
-    if 'Equipment_ID' not in df.columns:
-        df['Equipment_ID'] = 'EQ001'
+    # ── Build standardized dataframe ───────────────────────────────────────
+    std = pd.DataFrame()
 
-    # Convert timestamp
-    df['Timestamp'] = pd.to_datetime(df['Timestamp'], errors='coerce')
-    df = df.sort_values('Timestamp').reset_index(drop=True)
+    std['Timestamp']    = pd.to_datetime(df[time_col], errors='coerce') if time_col else pd.date_range(start='2024-01-01', periods=len(df), freq='1min')
+    std['Equipment_ID'] = df[id_col].astype(str) if id_col else 'EQ001'
+    std['Temperature_C']  = pd.to_numeric(df[temp_col], errors='coerce') if temp_col else 0
+    std['Vibration_ms2']  = pd.to_numeric(df[vib_col],  errors='coerce') if vib_col  else 0
+    std['Voltage_V']      = pd.to_numeric(df[volt_col], errors='coerce') if volt_col else 0
 
-    # Fill missing values with median
-    df = df.fillna(df.median(numeric_only=True))
+    if fail_col:
+        std['Failure_Status'] = pd.to_numeric(df[fail_col], errors='coerce').fillna(0).astype(int)
 
-    return df
+    std = std.sort_values('Timestamp').reset_index(drop=True)
+    std = std.fillna(std.median(numeric_only=True))
+
+    return std
 
 
 def add_features(df):
     """Add rolling stats and Z-score features"""
-    
-    # Rolling mean and std (window of 10 readings)
-    df['Vibration_RollingMean'] = df['Vibration_ms2'].rolling(10).mean().fillna(df['Vibration_ms2'])
-    df['Temp_RollingMean']      = df['Temperature_C'].rolling(10).mean().fillna(df['Temperature_C'])
-    df['Voltage_RollingMean']   = df['Voltage_V'].rolling(10).mean().fillna(df['Voltage_V'])
 
-    # Z-score for each sensor column
+    for col, out in [('Vibration_ms2', 'Vibration_RollingMean'),
+                     ('Temperature_C', 'Temp_RollingMean'),
+                     ('Voltage_V',     'Voltage_RollingMean')]:
+        df[out] = df[col].rolling(10).mean().fillna(df[col])
+
     for col in ['Temperature_C', 'Vibration_ms2', 'Voltage_V']:
         mean = df[col].mean()
         std  = df[col].std()
-        df[f'{col}_Zscore'] = (df[col] - mean) / std
+        df[f'{col}_Zscore'] = (df[col] - mean) / (std if std != 0 else 1)
 
     return df
 
@@ -89,7 +88,6 @@ def flag_anomalies(df, threshold=2.5):
 
 
 def get_feature_columns():
-    """Return list of feature columns used for ML"""
     return [
         'Temperature_C', 'Vibration_ms2', 'Voltage_V',
         'Vibration_RollingMean', 'Temp_RollingMean', 'Voltage_RollingMean',
