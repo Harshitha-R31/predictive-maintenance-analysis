@@ -59,35 +59,40 @@ def evaluate_model(model, X_test, y_test):
 # ── SHAP Explainability ───────────────────────────────────────────────────────
 
 def get_shap_values(model, X_test):
-    """Compute SHAP values for explainability"""
-    explainer   = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(X_test)
-    return explainer, shap_values
+    """Compute SHAP values using new SHAP Explanation object"""
+    explainer = shap.TreeExplainer(model)
+    explanation = explainer(X_test)   # returns Explanation object (new API)
+    return explainer, explanation
 
 
-def plot_shap(shap_values, X_test):
-    """Return SHAP summary bar chart as matplotlib figure"""
+def plot_shap(explanation, X_test):
+    """Return SHAP feature importance bar chart"""
     fig, ax = plt.subplots(figsize=(8, 4))
 
-    # Handle both old and new SHAP output formats
-    # Old SHAP: shap_values is a list [class0_array, class1_array]
-    # New SHAP: shap_values is a 3D array (samples, features, classes)
-    if isinstance(shap_values, list):
-        # Old format — pick class 1 (Failure)
-        sv = shap_values[1] if len(shap_values) > 1 else shap_values[0]
-    elif hasattr(shap_values, "ndim") and shap_values.ndim == 3:
-        # New format — slice class 1
-        sv = shap_values[:, :, 1]
-    else:
-        sv = shap_values
+    import numpy as np
 
-    shap.summary_plot(
-        sv, X_test,
-        plot_type="bar",
-        show=False,
-        color="#E05C2A"
-    )
-    plt.title("Feature Importance (SHAP) — Failure Prediction", fontsize=12)
+    # explanation.values shape:
+    #   (n_samples, n_features)          — binary/regression
+    #   (n_samples, n_features, n_classes) — multiclass
+    vals = explanation.values
+
+    if vals.ndim == 3:
+        # Multiclass: pick class 1 (Failure)
+        sv = vals[:, :, 1]
+    elif vals.ndim == 2:
+        sv = vals
+    else:
+        sv = vals.reshape(1, -1)
+
+    # Use mean absolute SHAP value per feature for bar chart
+    mean_abs = np.abs(sv).mean(axis=0)
+    feat_names = X_test.columns.tolist()
+
+    sorted_idx = np.argsort(mean_abs)
+    ax.barh([feat_names[i] for i in sorted_idx],
+            mean_abs[sorted_idx], color="#E05C2A")
+    ax.set_xlabel("Mean |SHAP Value|")
+    ax.set_title("Feature Importance (SHAP) — Failure Prediction", fontsize=12)
     plt.tight_layout()
     return fig
 
