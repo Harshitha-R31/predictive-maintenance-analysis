@@ -139,7 +139,13 @@ if uploaded:
 
         # Predict on full dataset
         df['Predicted_Failure'] = model.predict(X_full)
-        df['Failure_Probability'] = model.predict_proba(X_full)[:, 1]
+        proba = model.predict_proba(X_full)
+        if proba.shape[1] == 1:
+            classes = model.classes_
+            df['Failure_Probability'] = proba[:, 0] if classes[0] == 1 else 0.0
+            st.warning('⚠️ Model trained on only one class. Dataset may have no failures.')
+        else:
+            df['Failure_Probability'] = proba[:, 1]
 
         # Model metrics
         from sklearn.metrics import accuracy_score, f1_score
