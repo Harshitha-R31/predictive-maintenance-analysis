@@ -19,6 +19,32 @@ st.set_page_config(
 st.title("⚙️ Predictive Equipment Failure Dashboard")
 st.caption("Industry 4.0 · Real-time Anomaly Detection & ML Failure Prediction")
 
+st.markdown("""
+    <style>
+        /* Main background */
+        .stApp {
+            background-color: #EBF5FB;
+        }
+
+        /* Sidebar background */
+        [data-testid="stSidebar"] {
+            background-color: #D6EAF8;
+        }
+
+        /* Card/metric background */
+        [data-testid="stMetric"] {
+            background-color: #D6EAF8;
+            border-radius: 10px;
+            padding: 10px;
+        }
+
+        /* Text color */
+        html, body, [class*="css"] {
+            color: #1a1a1a;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Controls")
